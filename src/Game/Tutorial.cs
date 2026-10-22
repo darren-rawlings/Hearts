@@ -1,21 +1,20 @@
 using System.Collections.Generic;
 using Renegade.Ui;
 
-namespace GameTemplate.Game;
+namespace Hearts.Game;
 
-/// <summary>
-/// The guided tour behind the Demo button: a few short pages, each with a looping clip recorded
-/// from the game itself (see Main.PlayClip and addons/renegade_core/tools/Record-Clips.ps1).
-/// Text only, no voice. A page without a clip (Video = null) just shows its text.
-/// </summary>
+/// <summary>The guided tour behind the Demo button: a few short pages.</summary>
 public static class Tutorial
 {
 	public static readonly IReadOnlyList<TutorialPage> Pages = new[]
 	{
-		new TutorialPage("Knock five times",
-			"Tap the board to knock on it. Five knocks finish a game, and the board catches fire. Replace this page with the real game's rules.",
-			"res://tutorial/knock.ogv"),
-		new TutorialPage("Tips",
-			"Drag sideways to spin the board, or freeze it in Settings."),
+		new TutorialPage("Avoid points",
+			"Every heart you take scores 1 point against you, and the queen of spades 13. The lowest score wins when someone reaches 100."),
+		new TutorialPage("Pass three",
+			"Before each hand, tap three cards to pass, then press Pass: left, then right, then across; every fourth hand you keep your cards."),
+		new TutorialPage("Play",
+			"The two of clubs leads. Follow suit if you can (greyed cards can't be played). With none of the suit, play anything, and get rid of trouble. Hearts can't be led until one has been played, and nobody may play points on the first trick."),
+		new TutorialPage("Shoot the moon",
+			"Take every heart and the queen of spades, all 26 points, and everyone else scores 26 instead!"),
 	};
 }

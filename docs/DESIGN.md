@@ -1,19 +1,25 @@
-# Game Template: design
+# Hearts: design
+
+A Renegade card game on the card kit ([renegade-cards](https://github.com/darren-rawlings/renegade-cards)).
 
 ## The game
-What it is, in two sentences. Rules summary, and anything that differs from the classic version.
+Hearts for four: you, Rosie (left), Max (across) and Lena (right); a game to 100, lowest wins.
+Pass three cards left, right, across, then hold. The two of clubs leads; follow suit if you can;
+no points on the first trick unless you've nothing else; hearts can't be led until broken.
+Hearts score 1, the queen of spades 13; take all 26 and everyone else scores 26. Rules in
+`src/Core` (tested, including whole games).
 
 ## Feel
-What makes it satisfying to touch: the physical pieces, the sounds, the one signature effect
-(Counter Fire's was the winning line catching fire).
+- Tap three cards to raise them, then Pass: the hands slide the cards face down across, and
+  the three you received stand out for a moment.
+- Cards you can't play are greyed. Each played card lands in front of its player in the middle;
+  the winner's hand sweeps the trick onto their pile.
 
-## Modes
-- Player vs player on one phone
-- Player vs computer: Easy, Medium, Hard
-
-## Ads
-- Between-games interstitial every 5th finished game
-- Rewarded ad for an optional extra (Counter Fire: Undo)
+## Computer levels
+Easy (any legal card), Medium (ducks, dumps the queen and high hearts, leads low), Hard (looks
+ahead: deals the unseen cards many ways and plays each option through; runs on a background
+thread).
 
 ## Scope for version 1
-What ships first; everything else goes in a "later" list.
+Everything above. Later: tutorial clips, the "Jack of diamonds" variant, moon-shot choice
+(subtract 26 from yourself instead).

@@ -1,277 +1,266 @@
-using GameTemplate.Core;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using Godot;
-using Renegade.Ads;
-using Renegade.Audio;
+using Hearts.Core;
+using Renegade.Cards;
 using Renegade.Core;
-using Renegade.Dev;
-using Renegade.Looks;
 using Renegade.Play;
 using Renegade.Ui;
 
-namespace GameTemplate.Game;
+namespace Hearts.Game;
 
 /// <summary>
-/// Starting point for a new game, built the way every Renegade game is: the shared stage (lights,
-/// reflection sky, table), a board on a rig that spins with a drag, the shared HUD (modes,
-/// difficulty, Style menu, Undo (ad), Start over, Settings with sound and freeze, a video
-/// tutorial behind Demo), material sounds, ads every 5th game, the winner's fire and the flight
-/// recorder. The placeholder game: tap the board to knock it, five knocks finish a game.
-/// Replace the board, the rules (src/Core), the tap, the tutorial pages and the clips with the
-/// real game. Tutorial clips: give each a case in PlayClip, then run
-/// addons/renegade_core/tools/Record-Clips.ps1 with their names.
+/// Hearts with three computer players (Rosie on your left, Max across, Lena on your right), a
+/// game to 100. Pick three cards to pass by tapping them, then press Pass. On your turn, tap a
+/// card to play it (cards you can't play are greyed). Each trick's winner sweeps it to their pile.
 /// </summary>
-public partial class Main : Node3D
+public partial class Main : CardGame
 {
-	public const string Title = "Game Template";
+	private readonly Dictionary<Card, Card3D> _nodes = new();
+	private HeartsGame _game = new();
+	private HeartsHand? _hand;
+	private readonly HeartsAi[] _ais = new HeartsAi[4];
+	private readonly List<Card3D> _trick = new();
+	private Button _pass = null!;
 
-	/// <summary>Google's test ad units until the real ones exist in AdMob (see the release playbook).</summary>
-	private static readonly AdMobConfig AdUnits = AdMobConfig.Test;
+	protected override string Title => "Hearts";
+	protected override string Hint => "Tap a card to play it";
+	protected override int MinPlayers => 4;
+	protected override int MaxPlayers => 4;
+	protected override bool SortYourHand => false;
+	protected override string NewGameText => _game.IsOver ? "New game" : "Next hand";
+	protected override IReadOnlyList<TutorialPage> TutorialPages => Tutorial.Pages;
+	protected override bool InProgress => !_game.IsOver && (_game.Hands > 0 || _hand is { Phase: not HeartsPhase.Over });
 
-	private const float Thickness = 0.4f;
+	protected override void LevelChanged(Difficulty difficulty) => MakeAis(difficulty);
 
-	private readonly ImpactBank<Style> _impacts = new(Styles.Impact);
-	private readonly Scoreboard _wins = new();
-
-	private GameSettings _settings = null!;
-	private Counter _game = new(5);
-	private Node3D _rig = null!;
-	private Camera3D _camera = null!;
-	private MeshInstance3D _board = null!;
-	private SoundPool _sound = null!;
-	private GameHud _hud = null!;
-	private IAdService _ads = null!;
-	private AdSchedule? _adSchedule;
-	private SpinControl _spin = null!;
-	private Flames? _fire;
-
-	private bool _demo;
-	private bool _quitAfterDemo;
-	private string? _clip;
-	private float _demoTimer;
-
-	public override void _Ready()
+	private void MakeAis(Difficulty difficulty)
 	{
-		DevLog.Tag = "gt";
-		AudioWatch.Attach(this, Title);
-		_settings = GameSettings.Load();
-		ReadDeveloperArgs();
-		AudioServer.SetBusMute(0, _settings.Muted);
+		for (int s = 0; s < 4; s++)
+			_ais[s] = new HeartsAi(s, s == 0 ? Difficulty.Medium : difficulty, new Random(Random.Next()));
+	}
 
-		_camera = new Camera3D { Position = new Vector3(0, 10f, 6.5f), Fov = 52, KeepAspect = Camera3D.KeepAspectEnum.Width };
-		AddChild(_camera);
-		_camera.LookAt(new Vector3(0, -0.4f, 0.3f));
-		Stage.Build(this, -Thickness, new Color("1a0f09"));
-		_rig = new Node3D();
-		AddChild(_rig);
-		_board = new MeshInstance3D
+	protected override void AddSettings()
+	{
+		_pass = Hud.AddButton("Pass", true, Control.LayoutPreset.CenterBottom, -170, 170, -192, -128, 28);
+		_pass.Visible = false;
+		_pass.Pressed += () =>
 		{
-			Mesh = new BoxMesh { Size = new Vector3(7, Thickness, 7) },
-			Position = new Vector3(0, -Thickness / 2, 0),
-			MaterialOverride = Materials.For(Styles.BoardLook(_settings.Board)),
+			if (!Busy && _hand is { Phase: HeartsPhase.Passing } && Fans[0].RaisedCards.Count == 3)
+				Run(DoPass(Fans[0].RaisedCards.Select(n => n.Card).ToList()));
 		};
-		_rig.AddChild(_board);
-		Stage.WarmUp(this, -Thickness, Sparkle.Halo);
+	}
 
-		_sound = new SoundPool();
-		AddChild(_sound);
-		_adSchedule ??= new AdSchedule(_settings.GamesSinceAd);
-		var theme = HudTheme.Warm;
-		_ads = AdServices.Create(this, AdUnits, _demo, new PlaceholderAds { TextColor = theme.Text });
-
-		_hud = new GameHud(theme);
-		AddChild(_hud);
-		// The HUD saves Sound and Freeze the board itself; add a game's own Settings rows with
-		// _hud.AddToggle and _hud.AddChoice (keep their values in _settings.Extra).
-		_hud.Build(new HudOptions(Title, "Tap the board  ·  Drag sideways to spin"), _settings);
-		_hud.NewGamePressed += OnNewGamePressed;
-		_hud.RestartPressed += OnRestartPressed;
-		_hud.SetTutorial(Tutorial.Pages);
-		_hud.ModeChosen += (mode, difficulty) =>
-		{
-			_settings.Mode = mode;
-			_settings.Difficulty = difficulty;
-			_settings.Save();
-		};
-		_hud.BoardChosen += style =>
-		{
-			_settings.Board = style;
-			_settings.Save();
-			_board.MaterialOverride = Materials.For(Styles.BoardLook(style));
-		};
-		_hud.PiecesChosen += style =>
-		{
-			_settings.Pieces = style;
-			_settings.Save();
-		};
-
-		_spin = new SpinControl(_rig, () => !_settings.FreezeBoard);
-		// Freeze the board also turns it back to where it started.
-		_spin.Frozen = () => _settings.FreezeBoard;
-		_spin.Tapped += OnTapped;
-		RefreshUi();
-		if (_clip != null)
-		{
-			_hud.Visible = false;
-			_ = PlayClip(_clip);
+	protected override async Task NewRound()
+	{
+		int round = Round;
+		_pass.Visible = false;
+		if (_game.IsOver)
+			_game = new HeartsGame();
+		MakeAis(Settings.Difficulty);
+		_nodes.Clear();
+		_trick.Clear();
+		_hand = null;
+		SetScore();
+		var order = Deck.Shuffled(Random);
+		var nodes = await ShuffleOnTable(order);
+		if (round != Round)
 			return;
-		}
-		if (!_demo)
-			_hud.OfferTutorialOnce(_settings);
-		_hud.ApplyDevFlags();
-	}
-
-	public override void _UnhandledInput(InputEvent @event)
-	{
-		if (!_hud.MenuOpen)
-			_spin.HandleInput(@event);
-	}
-
-	/// <summary>A tap on the board: a knock in the board's material, sparks on the last one.</summary>
-	private void OnTapped(Vector2 screen)
-	{
-		if (_game.IsDone)
+		for (int i = 0; i < order.Count; i++)
+			_nodes[order[i]] = nodes[i];
+		var hand = new HeartsHand(order, _game.Hands);
+		_hand = hand;
+		int first = _game.Hands % 4;
+		await DealRound(nodes, Enumerable.Range(0, 52).Select(i => (first + i) % 4).ToList(), spacing: 0.045f);
+		if (round != Round)
 			return;
-		var from = _camera.ProjectRayOrigin(screen);
-		var direction = _camera.ProjectRayNormal(screen);
-		if (direction.Y > -0.01f)
-			return;
-		var hit = from + direction * (-from.Y / direction.Y);
-		var local = _rig.ToLocal(hit);
-		if (Mathf.Abs(local.X) > 3.5f || Mathf.Abs(local.Z) > 3.5f)
-			return;
-		_hud.HideHint();
-		_game.Tap();
-		_sound.PlayImpact(_impacts.Random(_settings.Board), hit, 1f, Styles.GainDb(_settings.Board));
-		if (_game.IsDone)
+		await PickUpAll(s => hand.Hand(s).Select(c => _nodes[c]));
+		ArrangeBySuit();
+		Hud.SetRestartVisible(true);
+		if (hand.Phase == HeartsPhase.Passing)
 		{
-			_wins.Win(first: true);
-			Sparkle.Burst(_rig, local + new Vector3(0, 0.3f, 0));
-			// The winner's fire: in a real game, set the winning pieces alight.
-			_fire = Flames.SetAlight(_rig, local, new[] { _board }, radius: 0.6f, size: 1.4f, withLight: true);
-		}
-		RefreshUi();
-	}
-
-	private void OnNewGamePressed()
-	{
-		bool adDue = _adSchedule!.GameFinished();
-		_settings.GamesSinceAd = _adSchedule.GamesSinceAd;
-		_settings.Save();
-		if (adDue)
-		{
-			DevLog.Write("ad: between-games interstitial");
-			_ads.ShowInterstitial(StartGame);
-		}
-		else
-		{
-			StartGame();
-		}
-	}
-
-	private void StartGame()
-	{
-		_fire?.Extinguish();
-		_fire = null;
-		_board.MaterialOverlay = null;
-		_game = new Counter(5);
-		RefreshUi();
-	}
-
-	/// <summary>
-	/// Start over mid-game. Against the computer it counts as resigning (a loss) unless the player
-	/// watches an ad; between two players it just asks first.
-	/// </summary>
-	private void OnRestartPressed()
-	{
-		if (_game.IsDone || _game.Count == 0)
-		{
-			StartGame();
-			return;
-		}
-		_hud.AskRestart(_settings.Mode == GameMode.PlayerVsComputer && !_demo, countLoss =>
-		{
-			if (countLoss)
-				_wins.Win(first: false);
-			StartGame();
-		}, then => _ads.ShowRewarded(rewarded: then, closed: () => { }));
-	}
-
-	/// <summary>
-	/// Plays one scripted scene for the tutorial (with --clip=name), then quits; the HUD is hidden
-	/// so the clip shows only the board. Record them with addons/renegade_core/tools/Record-Clips.ps1.
-	/// </summary>
-	private async System.Threading.Tasks.Task PlayClip(string clip)
-	{
-		_settings.Muted = false;
-		await ToSignal(GetTree().CreateTimer(0.8), SceneTreeTimer.SignalName.Timeout);
-		switch (clip)
-		{
-			default:
-				for (int i = 0; i < 5; i++)
-				{
-					OnTapped(GetViewport().GetVisibleRect().Size / 2);
-					await ToSignal(GetTree().CreateTimer(0.6), SceneTreeTimer.SignalName.Timeout);
-				}
-				break;
-		}
-		await ToSignal(GetTree().CreateTimer(2.0), SceneTreeTimer.SignalName.Timeout);
-		GetTree().Quit();
-	}
-
-	private void RefreshUi()
-	{
-		_hud.SetScore($"Games {_wins.First}");
-		_hud.SetNewGameVisible(_game.IsDone);
-		_hud.SetRestartVisible(!_game.IsDone);
-		_hud.SetStatus(_game.IsDone ? "Done!" : $"Knock {_game.Count} of {_game.Target}", new Color("fff3e0"));
-		if (_game.IsDone && _demo && _quitAfterDemo && _wins.First >= 5)
-			GetTree().Quit();
-	}
-
-	public override void _Process(double delta)
-	{
-		float dt = (float)delta;
-		_spin.Process(dt);
-		if (!_demo)
-			return;
-		_demoTimer += dt;
-		if (_demoTimer < 0.3f)
-			return;
-		_demoTimer = 0f;
-		if (_game.IsDone)
-			OnNewGamePressed();
-		else
-			OnTapped(GetViewport().GetVisibleRect().Size / 2);
-	}
-
-	/// <summary>
-	/// Developer flags after `--` (or in user://dev_args.txt on a phone): `--log`, `--demo`,
-	/// `--quit-after-demo`, `--games-since-ad=4`, `--clip=knock` (plays a tutorial clip and quits),
-	/// plus the HUD's `--tutorial=N` and `--settings`. Add the game's own flags here.
-	/// </summary>
-	private void ReadDeveloperArgs()
-	{
-		foreach (var (name, value) in DevArgs.Read())
-		{
-			switch (name)
+			if (Demo)
 			{
-				case "--log":
-					DevLog.Enabled = true;
-					break;
-				case "--demo":
-					_demo = true;
-					_settings.Muted = false;
-					break;
-				case "--quit-after-demo":
-					_quitAfterDemo = true;
-					break;
-				case "--games-since-ad":
-					_adSchedule = new AdSchedule(int.Parse(value));
-					break;
-				case "--clip":
-					_clip = value;
-					break;
+				await DoPass(_ais[0].ChoosePass(hand));
+				return;
 			}
+			Busy = false;
+			_pass.Text = $"Pass {PassName(hand.Direction)}";
+			_pass.Visible = true;
+			_pass.Disabled = true;
+			Hud.SetStatus($"Choose three cards to pass {PassName(hand.Direction)}: tap them.", Bright);
+			return;
 		}
+		Hud.SetStatus("This hand, everyone keeps their cards.", Muted);
+		await Pause(0.8f);
+		await NextTurn();
+	}
+
+	private static string PassName(Pass pass) => pass switch { Pass.Left => "left", Pass.Right => "right", Pass.Across => "across", _ => "" };
+
+	private async Task DoPass(IReadOnlyList<Card> mine)
+	{
+		var hand = _hand!;
+		Busy = true;
+		_pass.Visible = false;
+		Fans[0].LowerAll();
+		var chosen = new List<Card>[4];
+		chosen[0] = mine.ToList();
+		for (int s = 1; s < 4; s++)
+			chosen[s] = _ais[s].ChoosePass(hand);
+		for (int s = 0; s < 4; s++)
+			hand.SetPass(s, chosen[s]);
+		Hud.SetStatus($"Everyone passes three cards {PassName(hand.Direction)}.", Muted);
+		// Each player slides their three face down towards the one they pass to, who picks them up.
+		var moves = new List<Task>();
+		for (int s = 0; s < 4; s++)
+		{
+			var cards = chosen[s].Select(c => _nodes[c]).ToList();
+			foreach (var node in cards)
+				Fans[s].Remove(node);
+			Fans[s].Settle();
+			int to = hand.PassTarget(s);
+			var spot = Table.Landing[to];
+			var targets = cards.Select((_, i) => FaceDownAt(spot + new Vector3(i * 0.1f, 0.004f * (i + 1), 0), 0.2f * i)).ToList();
+			moves.Add(Hands[s].Carry(cards, targets, seconds: 0.4f, lift: 0.25f));
+		}
+		await Task.WhenAll(moves);
+		var pickups = new List<Task>();
+		for (int s = 0; s < 4; s++)
+			pickups.Add(IntoFan(s, hand.Received(s).Select(c => _nodes[c]).ToList()));
+		await Task.WhenAll(pickups);
+		ArrangeBySuit();
+		// Your three new cards stand out for a moment.
+		foreach (var card in hand.Received(0))
+			Fans[0].RaiseCard(_nodes[card], true);
+		Fans[0].Settle(0.2f);
+		var from = Enumerable.Range(1, 3).First(s => hand.PassTarget(s) == 0);
+		Hud.SetStatus($"{Names[from]} passed you these.", Bright);
+		await Pause(1.4f);
+		Fans[0].LowerAll();
+		Fans[0].Settle(0.2f);
+		await NextTurn();
+	}
+
+	private async Task NextTurn()
+	{
+		var hand = _hand!;
+		int round = Round;
+		SetScore();
+		if (hand.Phase == HeartsPhase.Over)
+		{
+			EndHand();
+			return;
+		}
+		int seat = hand.Current;
+		if (seat == 0 && !Demo)
+		{
+			var legal = hand.Legal();
+			DimUnplayable(legal);
+			Busy = false;
+			Hud.SetStatus(hand.Trick.Count == 0
+				? (hand.FirstTrick ? "Lead the two of clubs." : "Your lead: tap a card.")
+				: "Your turn: tap a card to play.", Bright);
+			return;
+		}
+		Busy = true;
+		var copy = hand.Clone();
+		var ai = _ais[seat];
+		var think = Task.Run(() => ai.ChoosePlay(copy));
+		await Pause(0.45f);
+		var card = await think;
+		if (round != Round)
+			return;
+		await Play(seat, card);
+	}
+
+	private async Task Play(int seat, Card card)
+	{
+		var hand = _hand!;
+		Busy = true;
+		DimUnplayable(null);
+		bool breaks = card.Suit == Suit.Hearts && !hand.HeartsBroken;
+		var won = hand.PlayCard(card);
+		var node = _nodes[card];
+		_trick.Add(node);
+		await PlayToTrick(seat, node);
+		if (seat == 0)
+			ArrangeBySuit();
+		if (breaks)
+			Hud.SetStatus("Hearts are broken!", Bright);
+		else if (card == HeartsHand.QueenOfSpades)
+			Hud.SetStatus(seat == 0 ? "You play the queen of spades!" : $"{Names[seat]} plays the queen of spades!", Bright);
+		if (won != null)
+		{
+			await Pause(0.7f);
+			string pts = won.Points == 0 ? "no points" : won.Points == 1 ? "1 point" : $"{won.Points} points";
+			Hud.SetStatus(won.Winner == 0 ? $"You take the trick: {pts}." : $"{Names[won.Winner]} takes the trick: {pts}.", won.Points > 0 ? Bright : Muted);
+			await SweepTrick(won.Winner, _trick.ToList(), hand.TricksWon(won.Winner) - 1);
+			_trick.Clear();
+		}
+		await NextTurn();
+	}
+
+	private void EndHand()
+	{
+		var hand = _hand!;
+		_game.Record(hand);
+		SetScore();
+		string moon = hand.MoonShooter >= 0 ? (hand.MoonShooter == 0 ? "You shot the moon! Everyone else takes 26. " : $"{Names[hand.MoonShooter]} shot the moon! ") : "";
+		string mine = $"You took {hand.Points(0)} this hand.";
+		if (_game.IsOver)
+		{
+			var leaders = _game.Leaders;
+			int winner = leaders.Count == 1 ? leaders[0] : -1;
+			string result = winner == 0 ? $"You win with {_game.Scores[0]}!" : winner > 0 ? $"{Names[winner]} wins with {_game.Scores[winner]}." : "A tie for the lowest score!";
+			if (winner >= 0)
+				Sparkle.Burst(this, Table.Winnings[winner] + Vector3.Up * 0.3f);
+			Finish($"{moon}{result}", leaders.Contains(0) ? 0 : 1, leaders.Contains(0) ? AllWonBy(0) : null, Table.Winnings[0]);
+		}
+		else
+		{
+			Finish($"{moon}{mine}", -1);
+		}
+	}
+
+	private IEnumerable<Card3D> AllWonBy(int seat) =>
+		GetChildren().OfType<Card3D>().Where(n => n.GlobalPosition.DistanceTo(Table.Winnings[seat]) < 0.8f).Take(8);
+
+	private void SetScore()
+	{
+		var scores = Enumerable.Range(0, 4).Select(s => $"{(s == 0 ? "you" : Names[s])} {_game.Scores[s] + (_hand is { Phase: not HeartsPhase.Over } h ? h.Points(s) : 0)}");
+		Hud.SetScore($"To 100: {string.Join(" · ", scores)}");
+	}
+
+	protected override void Tapped(Vector3 origin, Vector3 direction, Vector2 screen)
+	{
+		if (_hand is not { } hand || Fans[0].At(origin, direction) is not { } card)
+			return;
+		if (hand.Phase == HeartsPhase.Passing)
+		{
+			bool raise = !Fans[0].IsRaised(card);
+			if (raise && Fans[0].RaisedCards.Count >= 3)
+				return;
+			Fans[0].RaiseCard(card, raise);
+			Fans[0].Settle(0.12f);
+			_pass.Disabled = Fans[0].RaisedCards.Count != 3;
+			int left = 3 - Fans[0].RaisedCards.Count;
+			Hud.SetStatus(left == 0 ? $"Press Pass to send them {PassName(hand.Direction)}." : $"Choose {left} more to pass {PassName(hand.Direction)}.", Bright);
+			return;
+		}
+		if (hand.Phase != HeartsPhase.Playing || hand.Current != 0)
+			return;
+		if (!hand.Legal().Contains(card.Card))
+		{
+			Hud.SetStatus(hand.Trick.Count > 0 && hand.Hand(0).Any(c => c.Suit == hand.Trick[0].Card.Suit)
+				? "You must follow suit."
+				: hand.Trick.Count == 0 && !hand.HeartsBroken ? "Hearts aren't broken yet: lead another suit."
+				: "No points on the first trick.", Bright);
+			return;
+		}
+		Hud.HideHint();
+		Run(Play(0, card.Card));
 	}
 }
