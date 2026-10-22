@@ -197,6 +197,7 @@ public partial class Main : CardGame
 			await Pause(0.7f);
 			string pts = won.Points == 0 ? "no points" : won.Points == 1 ? "1 point" : $"{won.Points} points";
 			Hud.SetStatus(won.Winner == 0 ? $"You take the trick: {pts}." : $"{Names[won.Winner]} takes the trick: {pts}.", won.Points > 0 ? Bright : Muted);
+			TrickNews(won.Cards, won.Winner, won.Points > 0 ? pts : null);
 			await SweepTrick(won.Winner, _trick.ToList(), hand.TricksWon(won.Winner) - 1);
 			_trick.Clear();
 		}

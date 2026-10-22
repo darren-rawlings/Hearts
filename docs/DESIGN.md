@@ -23,3 +23,6 @@ thread).
 ## Scope for version 1
 Everything above. Later: tutorial clips, the "Jack of diamonds" variant, moon-shot choice
 (subtract 26 from yourself instead).
+
+## Changes from Darren's notes (2026-10-22)
+- Every finished trick is written to the log, card by card. Settings › Speed for faster play.
