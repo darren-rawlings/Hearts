@@ -137,7 +137,7 @@ public partial class Main : CardGame
 			Fans[0].RaiseCard(_nodes[card], true);
 		Fans[0].Settle(0.2f);
 		var from = Enumerable.Range(1, 3).First(s => hand.PassTarget(s) == 0);
-		Hud.SetStatus($"{Names[from]} passed you these.", Bright);
+		News($"{Names[from]} passed you these.");
 		await Pause(1.4f);
 		Fans[0].LowerAll();
 		Fans[0].Settle(0.2f);
@@ -155,6 +155,7 @@ public partial class Main : CardGame
 			return;
 		}
 		int seat = hand.Current;
+		ShowTurn(seat);
 		if (seat == 0 && !Demo)
 		{
 			var legal = hand.Legal();
@@ -166,6 +167,7 @@ public partial class Main : CardGame
 			return;
 		}
 		Busy = true;
+		Hud.SetStatus($"{Names[seat]}'s turn.", Muted);
 		var copy = hand.Clone();
 		var ai = _ais[seat];
 		var think = Task.Run(() => ai.ChoosePlay(copy));
@@ -189,14 +191,13 @@ public partial class Main : CardGame
 		if (seat == 0)
 			ArrangeBySuit();
 		if (breaks)
-			Hud.SetStatus("Hearts are broken!", Bright);
+			News("Hearts are broken!");
 		else if (card == HeartsHand.QueenOfSpades)
-			Hud.SetStatus(seat == 0 ? "You play the queen of spades!" : $"{Names[seat]} plays the queen of spades!", Bright);
+			News(seat == 0 ? "You play the queen of spades!" : $"{Names[seat]} plays the queen of spades!");
 		if (won != null)
 		{
 			await Pause(0.7f);
 			string pts = won.Points == 0 ? "no points" : won.Points == 1 ? "1 point" : $"{won.Points} points";
-			Hud.SetStatus(won.Winner == 0 ? $"You take the trick: {pts}." : $"{Names[won.Winner]} takes the trick: {pts}.", won.Points > 0 ? Bright : Muted);
 			TrickNews(won.Cards, won.Winner, won.Points > 0 ? pts : null);
 			await SweepTrick(won.Winner, _trick.ToList(), hand.TricksWon(won.Winner) - 1);
 			_trick.Clear();
