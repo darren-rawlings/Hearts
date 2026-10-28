@@ -102,6 +102,7 @@ public partial class Main : CardGame
 
 	private async Task DoPass(IReadOnlyList<Card> mine)
 	{
+		ClipMoment("pass", 6);
 		var hand = _hand!;
 		Busy = true;
 		_pass.Visible = false;
@@ -180,6 +181,7 @@ public partial class Main : CardGame
 
 	private async Task Play(int seat, Card card)
 	{
+		ClipMoment("trick", 7);
 		var hand = _hand!;
 		Busy = true;
 		DimUnplayable(null);
