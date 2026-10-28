@@ -219,7 +219,7 @@ public partial class Main : CardGame
 			string result = winner == 0 ? $"You win with {_game.Scores[0]}!" : winner > 0 ? $"{Names[winner]} wins with {_game.Scores[winner]}." : "A tie for the lowest score!";
 			if (winner >= 0)
 				Sparkle.Burst(this, Table.Winnings[winner] + Vector3.Up * 0.3f);
-			Finish($"{moon}{result}", leaders.Contains(0) ? 0 : 1, leaders.Contains(0) ? AllWonBy(0) : null, Table.Winnings[0]);
+			Finish($"{moon}{result}", leaders.Contains(0) ? 0 : 1, leaders.Contains(0) ? AllWonBy(0) : null, Table.Winnings[0], winningSeats: leaders);
 		}
 		else
 		{
